@@ -26,6 +26,12 @@ async function showList(ctx, page, popular = false) {
   const text = `${title}\n\n${instruction}\nHalaman ${result.page}/${result.pages}`;
   await safeEdit(ctx, text, { parse_mode: 'HTML', ...productListKeyboard(result, ctx.from.id, popular) });
 }
+async function replyList(ctx, page = 1) {
+  const result = productService.listProducts(page, 10);
+  ctx.session.productPage = result.items.map((product) => product.id);
+  const instruction = result.items.length ? `Pilih produk melalui tombol atau kirim nomor 1-${result.items.length}.` : 'Belum ada produk aktif.';
+  return ctx.reply(`📦 <b>List Produk</b>\n\n${instruction}\nHalaman ${result.page}/${result.pages}`, { parse_mode: 'HTML', ...productListKeyboard(result, ctx.from.id, false) });
+}
 async function showDetail(ctx, productId) {
   const product = productService.getProduct(productId);
   if (!product?.is_active) return ctx.answerCbQuery?.('Produk tidak ditemukan.', { show_alert: true });
@@ -91,4 +97,4 @@ function registerProductHandlers(bot) {
   });
   bot.action(/^cancel:([a-f0-9]{24})$/, async (ctx) => { orderService.cancelIntent(ctx.match[1], ctx.from.id); await ctx.answerCbQuery('Dibatalkan.'); await safeEdit(ctx, 'Pembelian dibatalkan.'); });
 }
-module.exports = { registerProductHandlers, showList, showDetail, replyDetail };
+module.exports = { registerProductHandlers, showList, replyList, showDetail, replyDetail };

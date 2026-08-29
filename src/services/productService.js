@@ -16,6 +16,11 @@ function listProducts(page = 1, limit = 10, popular = false) {
 }
 function getProduct(id) { return getDb().prepare(`${PRODUCT_SELECT} WHERE p.id=? GROUP BY p.id`).get(id); }
 function getProductByCode(code) { return getDb().prepare(`${PRODUCT_SELECT} WHERE p.code=? GROUP BY p.id`).get(code); }
+function activeProducts(limit = 25) {
+  const safeLimit = Math.min(requirePositiveInteger(limit, 'Limit'), 25);
+  return getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY p.id ASC LIMIT ?`).all(safeLimit);
+}
+function activeStockSummary() { return getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY p.id ASC`).all(); }
 function createProduct({ code, name, price, description }) {
   const cleanDescription = String(description ?? '').trim();
   if (cleanDescription.length > 2000) throw new Error('Deskripsi maksimal 2000 karakter.');
@@ -60,4 +65,4 @@ function addStock(productId, contents) {
 function stockSummary() {
   return getDb().prepare(`${PRODUCT_SELECT} GROUP BY p.id ORDER BY p.id`).all();
 }
-module.exports = { listProducts, getProduct, getProductByCode, createProduct, updateProduct, deleteProduct, addStock, stockSummary };
+module.exports = { listProducts, activeProducts, activeStockSummary, getProduct, getProductByCode, createProduct, updateProduct, deleteProduct, addStock, stockSummary };
