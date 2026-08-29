@@ -1,0 +1,21 @@
+{
+  "name": "rynassist-telegram-store",
+  "version": "1.0.0",
+  "description": "Telegram digital product store bot with atomic SQLite stock delivery",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "check": "node scripts/check-syntax.js",
+    "seed": "node scripts/seed.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "dotenv": "^17.2.1",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {}
+}

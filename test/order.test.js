@@ -1,0 +1,81 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+process.env.BOT_TOKEN = 'test-token-not-a-real-secret';
+process.env.DATABASE_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rynassist-')), 'test.db');
+
+const { getDb, closeDb } = require('../src/database');
+const products = require('../src/services/productService');
+const users = require('../src/services/userService');
+const orders = require('../src/services/orderService');
+const restock = require('../src/services/restockService');
+
+function createUser(id, balance = 0) {
+  users.upsertUser({ id, first_name: 'Test' });
+  if (balance) users.adjustBalance(id, balance, 'test');
+}
+
+test('saldo order atomik, mengirim stok unik, dan intent hanya sekali pakai', () => {
+  createUser(123, 50000);
+  const id = products.createProduct({ code: 'ORDER_OK', name: 'Test', price: 10000, description: '' });
+  products.addStock(id, ['A', 'B']);
+  const token = orders.createIntent(123, id, 2);
+  const result = orders.fulfillBalanceIntent(token, 123);
+
+  assert.deepEqual(result.stocks.map((stock) => stock.content), ['A', 'B']);
+  assert.equal(users.getUser(123).balance, 30000);
+  assert.equal(products.getProduct(id).available_stock, 0);
+  assert.throws(() => orders.fulfillBalanceIntent(token, 123), /tidak valid/);
+  assert.equal(getDb().prepare('SELECT COUNT(*) count FROM order_items').get().count, 2);
+  assert.equal(getDb().prepare("SELECT COUNT(*) count FROM stock_items WHERE status='sold'").get().count, 2);
+});
+
+test('semua mutasi order rollback bila penandaan salah satu stok gagal', () => {
+  createUser(124, 50000);
+  const id = products.createProduct({ code: 'ROLLBACK', name: 'Rollback', price: 10000, description: '' });
+  products.addStock(id, ['ROLLBACK-A', 'ROLLBACK-B']);
+  const blockedId = getDb().prepare("SELECT id FROM stock_items WHERE product_id=? AND content='ROLLBACK-B'").get(id).id;
+  getDb().exec(`CREATE TRIGGER fail_second_stock BEFORE UPDATE OF status ON stock_items WHEN OLD.id=${blockedId} BEGIN SELECT RAISE(ABORT, 'simulated stock failure'); END`);
+  const token = orders.createIntent(124, id, 2);
+
+  assert.throws(() => orders.fulfillBalanceIntent(token, 124), /simulated stock failure/);
+  assert.equal(users.getUser(124).balance, 50000);
+  assert.equal(getDb().prepare('SELECT COUNT(*) count FROM orders WHERE user_id=124').get().count, 0);
+  assert.equal(getDb().prepare("SELECT COUNT(*) count FROM stock_items WHERE product_id=? AND status='available'").get(id).count, 2);
+  assert.equal(getDb().prepare('SELECT status FROM purchase_intents WHERE token=?').get(token).status, 'pending');
+  getDb().exec('DROP TRIGGER fail_second_stock');
+});
+
+test('intent menolak quantity dan produk yang tidak valid', () => {
+  createUser(125, 50000);
+  const id = products.createProduct({ code: 'VALIDATE', name: 'Validate', price: 1000, description: '' });
+  products.addStock(id, ['ONLY']);
+  for (const invalid of [0, -1, NaN, 1.5, Infinity]) assert.throws(() => orders.createIntent(125, id, invalid), /Quantity/);
+  assert.throws(() => orders.createIntent(125, id, 2), /melebihi stok/);
+  products.updateProduct(id, 'is_active', 0);
+  assert.throws(() => orders.createIntent(125, id, 1), /tidak aktif/);
+});
+
+test('restock tidak menerima item duplikat dan subscription tetap unik', () => {
+  createUser(126);
+  const id = products.createProduct({ code: 'RESTOCK', name: 'Restock', price: 1000, description: '' });
+  assert.throws(() => products.addStock(id, ['SAMA', 'SAMA']), /duplikat/);
+  products.addStock(id, ['SAMA']);
+  assert.throws(() => products.addStock(id, ['SAMA']), /sudah pernah/);
+  assert.equal(restock.toggle(126, id), true);
+  assert.equal(getDb().prepare('SELECT COUNT(*) count FROM restock_subscriptions WHERE user_id=126 AND product_id=?').get(id).count, 1);
+  assert.equal(restock.toggle(126, id), false);
+  assert.equal(getDb().prepare('SELECT COUNT(*) count FROM restock_subscriptions WHERE user_id=126 AND product_id=?').get(id).count, 0);
+});
+
+test('pagination diklem ke halaman valid dan foreign key aktif', () => {
+  assert.equal(getDb().pragma('foreign_keys', { simple: true }), 1);
+  assert.equal(products.listProducts(999, 10).page, products.listProducts(1, 10).pages);
+  assert.throws(() => products.listProducts(0, 10), /Halaman/);
+  assert.throws(() => getDb().prepare("INSERT INTO stock_items(product_id,content) VALUES(999999,'orphan')").run(), /FOREIGN KEY/);
+});
+
+test.after(() => closeDb());
