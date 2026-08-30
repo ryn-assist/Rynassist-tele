@@ -12,6 +12,9 @@ const products = require('../src/services/productService');
 const users = require('../src/services/userService');
 const orders = require('../src/services/orderService');
 const restock = require('../src/services/restockService');
+const { numberRows } = require('../src/keyboards/main');
+const { productListKeyboard } = require('../src/keyboards/product');
+const { listText } = require('../src/handlers/productHandler');
 
 function createUser(id, balance = 0) {
   users.upsertUser({ id, first_name: 'Test' });
@@ -76,6 +79,29 @@ test('pagination diklem ke halaman valid dan foreign key aktif', () => {
   assert.equal(products.listProducts(999, 10).page, products.listProducts(1, 10).pages);
   assert.throws(() => products.listProducts(0, 10), /Halaman/);
   assert.throws(() => getDb().prepare("INSERT INTO stock_items(product_id,content) VALUES(999999,'orphan')").run(), /FOREIGN KEY/);
+});
+
+test('urutan produk aktif, teks pagination, dan keyboard angka selalu dinamis', () => {
+  const first = products.createProduct({ code: 'DYNAMIC_1', name: 'Produk <Satu>', price: 1000, description: '' });
+  const removed = products.createProduct({ code: 'DYNAMIC_2', name: 'Produk Dua', price: 1000, description: '' });
+  const third = products.createProduct({ code: 'DYNAMIC_3', name: 'Produk Tiga', price: 1000, description: '' });
+  products.addStock(first, ['DYNAMIC-STOCK']);
+
+  const before = products.activeProducts();
+  assert.equal(products.activeProductAt(before.findIndex((product) => product.id === third) + 1).id, third);
+  products.updateProduct(removed, 'is_active', 0);
+  const after = products.activeProducts();
+  const thirdPosition = after.findIndex((product) => product.id === third) + 1;
+  assert.equal(products.activeProductAt(thirdPosition).id, third);
+  assert.equal(products.activeProductAt(after.length + 1), undefined);
+
+  assert.deepEqual(numberRows(12), [['1', '2', '3', '4', '5'], ['6', '7', '8', '9', '10'], ['11', '12']]);
+  const result = products.listProducts(1, 10);
+  assert.match(listText(result), /LIST PRODUCT/);
+  assert.match(listText(result), /Produk &lt;Satu&gt; \( 1 \)/);
+  const buttons = productListKeyboard(result).reply_markup.inline_keyboard;
+  assert.ok(buttons.flat().every((button) => !/^\d+\./.test(button.text)));
+  if (result.pages > 1) assert.deepEqual(buttons[0].map((button) => button.text), ['➡️ Selanjutnya']);
 });
 
 test.after(() => closeDb());
