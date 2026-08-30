@@ -6,7 +6,7 @@ function createIntent(userId, productId, quantity, paymentMethod = 'balance', va
   const safeUserId = requirePositiveInteger(userId, 'Telegram user ID');
   const safeProductId = requirePositiveInteger(productId, 'ID produk');
   const safeQuantity = requirePositiveInteger(quantity, 'Quantity');
-  if (paymentMethod !== 'balance') throw new Error('Metode pembayaran intent tidak didukung.');
+  if (!['balance', 'pakasir', 'midtrans'].includes(paymentMethod)) throw new Error('Metode pembayaran intent tidak didukung.');
   if (!getDb().prepare('SELECT 1 FROM users WHERE telegram_id=?').get(safeUserId)) throw new Error('User tidak ditemukan.');
   const product = getDb().prepare('SELECT id FROM products WHERE id=? AND is_active=1').get(safeProductId);
   if (!product) throw new Error('Produk tidak aktif atau tidak ditemukan.');
@@ -32,8 +32,6 @@ function fulfillBalanceIntent(token, userId) {
     if (!intent) throw new Error('Permintaan pembelian tidak valid, kedaluwarsa, atau sudah diproses.');
     if (intent.payment_method !== 'balance') throw new Error('Metode pembayaran intent tidak valid.');
     const quantity = requirePositiveInteger(intent.quantity, 'Quantity');
-    const unitPrice = Number(intent.unit_price);
-    if (!Number.isSafeInteger(unitPrice) || unitPrice < 0) throw new Error('Harga intent tidak valid.');
     const claimed = getDb().prepare("UPDATE purchase_intents SET status='processing' WHERE token=? AND status='pending'").run(token);
     if (claimed.changes !== 1) throw new Error('Pembelian ini sedang/sudah diproses.');
     const product = getDb().prepare('SELECT * FROM products WHERE id=? AND is_active=1').get(intent.product_id);
@@ -42,13 +40,14 @@ function fulfillBalanceIntent(token, userId) {
     if (!variant) throw new Error('Varian tidak tersedia.');
     const stocks = getDb().prepare("SELECT id,content FROM stock_items WHERE variant_id=? AND status='available' ORDER BY id LIMIT ?").all(variant.id, quantity);
     if (stocks.length !== quantity) throw new Error('Stok tidak mencukupi. Silakan pilih quantity lain.');
+    const unitPrice = Number(variant.price); // Harga selalu dibaca ulang ketika user mengonfirmasi.
     const total = unitPrice * quantity;
     if (!Number.isSafeInteger(total)) throw new Error('Total harga berada di luar rentang aman.');
     const debit = getDb().prepare('UPDATE users SET balance=balance-?, updated_at=CURRENT_TIMESTAMP WHERE telegram_id=? AND balance>=?').run(total, safeUserId, total);
     if (debit.changes !== 1) throw new Error('Saldo tidak mencukupi.');
     const invoice = `RYN-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const orderId = getDb().prepare(`INSERT INTO orders(invoice,user_id,product_id,variant_id,quantity,unit_price,total_price,payment_method,status,paid_at)
-      VALUES(?,?,?,?,?,?,?,'balance','paid',CURRENT_TIMESTAMP)`).run(invoice, safeUserId, product.id, variant.id, quantity, unitPrice, total).lastInsertRowid;
+    const orderId = getDb().prepare(`INSERT INTO orders(invoice,user_id,product_id,variant_id,product_name,variant_name,quantity,unit_price,total_price,note,payment_method,payment_status,status,paid_at,fulfilled_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,'balance','paid','paid',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(invoice, safeUserId, product.id, variant.id, product.name, variant.name, quantity, unitPrice, total, intent.note).lastInsertRowid;
     const sell = getDb().prepare("UPDATE stock_items SET status='sold',order_id=?,sold_at=CURRENT_TIMESTAMP WHERE id=? AND status='available'");
     const item = getDb().prepare('INSERT INTO order_items(order_id,stock_item_id,delivered_content) VALUES(?,?,?)');
     for (const stock of stocks) {
@@ -62,9 +61,17 @@ function fulfillBalanceIntent(token, userId) {
     return { orderId, invoice, product, variant, stocks, total, balance };
   }).immediate();
 }
+function setIntentNote(token, userId, note) {
+  const value = note == null ? null : String(note).trim();
+  if (value && value.length > 500) throw new Error('Catatan maksimal 500 karakter.');
+  const result = getDb().prepare("UPDATE purchase_intents SET note=? WHERE token=? AND user_id=? AND status='pending' AND expires_at>CURRENT_TIMESTAMP").run(value || null, token, userId);
+  if (result.changes !== 1) throw new Error('Permintaan pembelian tidak valid atau kedaluwarsa.');
+  return getIntent(token, userId);
+}
+function getIntent(token, userId) { return getDb().prepare(`SELECT i.*,p.name product_name,v.name variant_name,v.price current_price,v.is_active variant_active,p.is_active product_active FROM purchase_intents i JOIN products p ON p.id=i.product_id JOIN product_variants v ON v.id=i.variant_id WHERE i.token=? AND i.user_id=?`).get(token,userId); }
 function cancelIntent(token, userId) {
   return getDb().prepare("UPDATE purchase_intents SET status='expired' WHERE token=? AND user_id=? AND status='pending'").run(token, userId).changes === 1;
 }
-function listOrders(limit = 30) { return getDb().prepare(`SELECT o.*,p.name,v.name variant_name,u.username FROM orders o JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id JOIN users u ON u.telegram_id=o.user_id ORDER BY o.id DESC LIMIT ?`).all(limit); }
-function userOrders(userId, limit = 10) { return getDb().prepare(`SELECT o.*,p.name,v.name variant_name FROM orders o JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id WHERE o.user_id=? ORDER BY o.id DESC LIMIT ?`).all(userId, limit); }
-module.exports = { createIntent, fulfillBalanceIntent, cancelIntent, listOrders, userOrders };
+function listOrders(limit = 30) { return getDb().prepare(`SELECT o.*,COALESCE(o.product_name,p.name) name,COALESCE(o.variant_name,v.name,'Legacy') variant_name,u.username FROM orders o JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id JOIN users u ON u.telegram_id=o.user_id ORDER BY o.id DESC LIMIT ?`).all(limit); }
+function userOrders(userId, limit = 10) { return getDb().prepare(`SELECT o.*,COALESCE(o.product_name,p.name) name,COALESCE(o.variant_name,v.name,'Legacy') variant_name FROM orders o JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id WHERE o.user_id=? ORDER BY o.id DESC LIMIT ?`).all(userId, limit); }
+module.exports = { createIntent, getIntent, setIntentNote, fulfillBalanceIntent, cancelIntent, listOrders, userOrders };

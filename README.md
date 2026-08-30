@@ -144,3 +144,23 @@ npm test
 ```
 
 Database dibuat otomatis pada startup. Backup file database beserta WAL/SHM hanya saat proses dihentikan, atau gunakan mekanisme backup SQLite yang benar.
+
+## Varian dan Payment Gateway
+
+Semua produk mempunyai varian. Database lama dimigrasikan otomatis dan produk lama mendapat varian default; harga order, deskripsi, serta stok selanjutnya mengacu ke varian. Restock menerima konten identik sebagai unit stok yang berbeda (maksimal 100 per command).
+
+Pilih provider dengan `PAYMENT_PROVIDER=pakasir` atau `PAYMENT_PROVIDER=midtrans`, lalu isi credential provider terkait. Secret hanya digunakan backend. Bila webhook digunakan, isi `PORT` dan arahkan provider ke:
+
+- `POST {PAYMENT_BASE_URL}/webhooks/pakasir`
+- `POST {PAYMENT_BASE_URL}/webhooks/midtrans`
+
+Pakasir membutuhkan `PAKASIR_SLUG` dan `PAKASIR_API_KEY`. Midtrans membutuhkan `MIDTRANS_SERVER_KEY`, `MIDTRANS_CLIENT_KEY`, serta `MIDTRANS_IS_PRODUCTION=false` untuk sandbox. Restart bot setelah mengganti provider. Order QRIS tetap pending sampai status diverifikasi langsung ke API provider; callback dan webhook berulang diproses secara idempoten.
+
+### Uji manual Pakasir sandbox
+
+1. Buat project/sandbox Pakasir, isi slug dan API key ke `.env` tanpa meng-commit file itu.
+2. Set `PAYMENT_PROVIDER=pakasir`, `PAYMENT_BASE_URL` ke URL HTTPS publik, dan `PORT` ke port listener.
+3. Daftarkan URL webhook Pakasir ke `{PAYMENT_BASE_URL}/webhooks/pakasir`, lalu restart bot.
+4. Pilih varian berstok, tekan **Buy (Now)**, skip/isi catatan, dan konfirmasi. Cocokkan reference serta nominal di Telegram dengan dashboard Pakasir.
+5. Gunakan mekanisme pembayaran simulasi resmi sandbox, lalu tekan **Cek Pembayaran** atau tunggu webhook. Pastikan hanya satu unit terkirim; kirim ulang webhook untuk memastikan stok tidak berkurang lagi.
+6. Uji status pending/expired dan nominal salah tanpa menggunakan uang sungguhan.
