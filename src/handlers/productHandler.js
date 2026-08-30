@@ -1,106 +1,21 @@
-const { Markup } = require('telegraf');
-const productService = require('../services/productService');
-const restockService = require('../services/restockService');
-const paymentProvider = require('../services/payment/placeholderProvider');
-const orderService = require('../services/orderService');
-const { productListKeyboard, productDetailKeyboard } = require('../keyboards/product');
-const { money, escapeHtml } = require('../utils/format');
-const { safeEdit, safeAnswerCallback } = require('../utils/telegram');
-const { isValidProductCallback } = require('../utils/callback');
-const { requirePositiveInteger } = require('../utils/validation');
-
-function detailText(product, quantity) {
-  return `<b>📦 Detail Produk</b>\n\n<b>Nama:</b> ${escapeHtml(product.name)}\n<b>Kode:</b> <code>${escapeHtml(product.code)}</code>\n<b>Sisa stok:</b> ${product.available_stock}\n<b>Stok terjual:</b> ${product.sold_count}\n<b>Total stok:</b> ${product.total_stock}\n\n<b>Deskripsi:</b>\n${escapeHtml(product.description || '-')}\n\n<b>Jumlah pembelian:</b> ${quantity}\n<b>Harga satuan:</b> ${money(product.price)}\n<b>Total harga:</b> ${money(product.price * quantity)}`;
-}
-function quantity(ctx, productId) {
-  const value = ctx.session.quantities?.[productId];
-  return Number.isSafeInteger(value) && value > 0 ? value : 1;
-}
-function setQuantity(ctx, productId, value) { ctx.session.quantities ||= {}; ctx.session.quantities[productId] = value; }
-function listText(result, popular = false) {
-  const title = popular ? '🔥 <b>PRODUK POPULER</b>' : '<b>LIST PRODUCT</b>';
-  const rows = result.items.map((product, index) => `[${(result.page - 1) * 10 + index + 1}]. ${escapeHtml(product.name)} ( ${product.available_stock} )`);
-  const products = rows.length ? rows.join('\n') : 'Belum ada produk aktif.';
-  return `${title}\n\n${products}\n\n📄 Halaman ${result.page} / ${result.pages}`;
-}
-
-async function showList(ctx, page, popular = false) {
-  const result = productService.listProducts(page, 10, popular);
-  await safeEdit(ctx, listText(result, popular), { parse_mode: 'HTML', ...productListKeyboard(result, popular) });
-}
-async function replyList(ctx, page = 1) {
-  const result = productService.listProducts(page, 10);
-  return ctx.reply(listText(result), { parse_mode: 'HTML', ...productListKeyboard(result) });
-}
-async function showDetail(ctx, productId) {
-  const product = productService.getProduct(productId);
-  if (!product?.is_active) return ctx.answerCbQuery?.('Produk tidak ditemukan.', { show_alert: true });
-  let qty = quantity(ctx, productId);
-  if (product.available_stock > 0) qty = Math.min(qty, product.available_stock); else qty = 1;
-  setQuantity(ctx, productId, qty);
-  ctx.session.activeProductId = productId;
-  await safeEdit(ctx, detailText(product, qty), { parse_mode: 'HTML', ...productDetailKeyboard(ctx.from.id, productId, qty, product.available_stock) });
-}
-async function replyDetail(ctx, productId) {
-  const product = productService.getProduct(productId);
-  if (!product?.is_active) return ctx.reply('Produk tidak aktif atau tidak ditemukan.');
-  const qty = 1;
-  setQuantity(ctx, productId, qty);
-  ctx.session.activeProductId = productId;
-  return ctx.reply(detailText(product, qty), { parse_mode: 'HTML', ...productDetailKeyboard(ctx.from.id, productId, qty, product.available_stock) });
-}
-async function replyDetailByPosition(ctx, position) {
-  if (!Number.isSafeInteger(position) || position <= 0) return ctx.reply('❌ Produk tidak tersedia. Silakan buka List Produk terbaru.');
-  const product = productService.activeProductAt(position);
-  if (!product) return ctx.reply('❌ Produk tidak tersedia. Silakan buka List Produk terbaru.');
-  return replyDetail(ctx, product.id);
-}
-function validSignedCallback(ctx, action, rawId, suppliedSignature) {
-  const id = requirePositiveInteger(rawId, 'ID produk');
-  if (!isValidProductCallback(ctx.from.id, action, id, suppliedSignature)) throw new Error('Callback produk tidak valid.');
-  return id;
-}
-function registerProductHandlers(bot) {
-  bot.action(/^products:(\d+)$/, async (ctx) => { await ctx.answerCbQuery(); await showList(ctx, Number(ctx.match[1])); });
-  bot.action(/^popular:(\d+)$/, async (ctx) => { await ctx.answerCbQuery(); await showList(ctx, Number(ctx.match[1]), true); });
-  bot.action(/^product:(\d+):([a-f0-9]{12})$/, async (ctx) => { const id = validSignedCallback(ctx, 'product', ctx.match[1], ctx.match[2]); await ctx.answerCbQuery(); await showDetail(ctx, id); });
-  bot.action(/^(minus|plus|reset):(\d+):([a-f0-9]{12})$/, async (ctx) => {
-    const [, action, rawId, suppliedSignature] = ctx.match; const id = validSignedCallback(ctx, action, rawId, suppliedSignature); const product = productService.getProduct(id);
-    if (!product?.is_active || ctx.session.activeProductId !== id) return ctx.answerCbQuery('Pilihan produk tidak valid. Buka ulang detail produk.', { show_alert: true });
-    let qty = quantity(ctx, id);
-    if (action === 'minus') qty = Math.max(1, qty - 1);
-    if (action === 'plus') qty = Math.min(product.available_stock || 1, qty + 1);
-    if (action === 'reset') qty = 1;
-    setQuantity(ctx, id, qty); await ctx.answerCbQuery(qty >= product.available_stock && action === 'plus' ? 'Quantity maksimal sesuai stok.' : undefined); await showDetail(ctx, id);
-  });
-  bot.action('noop', (ctx) => ctx.answerCbQuery());
-  bot.action(/^restock:(\d+):([a-f0-9]{12})$/, async (ctx) => { const id = validSignedCallback(ctx, 'restock', ctx.match[1], ctx.match[2]); const product = productService.getProduct(id); if (!product?.is_active || product.available_stock > 0) return ctx.answerCbQuery('Notifikasi restock hanya tersedia untuk produk aktif yang kosong.', { show_alert: true }); const active = restockService.toggle(ctx.from.id, id); await ctx.answerCbQuery(active ? 'Notifikasi restok diaktifkan.' : 'Notifikasi restok dibatalkan.', { show_alert: true }); });
-  bot.action(/^now:(\d+):([a-f0-9]{12})$/, async (ctx) => { const id = validSignedCallback(ctx, 'now', ctx.match[1], ctx.match[2]); if (ctx.session.activeProductId !== id) return ctx.answerCbQuery('Pilihan produk tidak valid.', { show_alert: true }); const result = await paymentProvider.createPayment(); await ctx.answerCbQuery(); await ctx.reply(`ℹ️ ${result.message}`); });
-  bot.action(/^balance:(\d+):([a-f0-9]{12})$/, async (ctx) => {
-    const id = validSignedCallback(ctx, 'balance', ctx.match[1], ctx.match[2]);
-    if (ctx.session.activeProductId !== id) return ctx.answerCbQuery('Pilihan produk tidak valid. Buka ulang detail produk.', { show_alert: true });
-    const product = productService.getProduct(id); const qty = quantity(ctx, id);
-    if (!product?.is_active) return ctx.answerCbQuery('Produk tidak aktif atau tidak ditemukan.', { show_alert: true });
-    if (!Number.isSafeInteger(qty) || qty <= 0 || product.available_stock < qty || product.available_stock === 0) return ctx.answerCbQuery('Quantity atau stok tidak valid.', { show_alert: true });
-    let token;
-    try { token = orderService.createIntent(ctx.from.id, id, qty); }
-    catch (error) { return ctx.answerCbQuery(error.message, { show_alert: true }); }
-    await ctx.answerCbQuery();
-    await ctx.reply(`Konfirmasi pembelian <b>${escapeHtml(product.name)}</b> sebanyak ${qty} dengan total <b>${money(product.price * qty)}</b>?`, { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('✅ Konfirmasi', `confirm:${token}`), Markup.button.callback('❌ Batal', `cancel:${token}`)]]) });
-  });
-  bot.action(/^confirm:([a-f0-9]{24})$/, async (ctx) => {
-    let result;
-    try {
-      result = orderService.fulfillBalanceIntent(ctx.match[1], ctx.from.id);
-    } catch (error) { return safeAnswerCallback(ctx, error.message, { show_alert: true }); }
-    const message = `✅ <b>Order Berhasil</b>\nInvoice: <code>${result.invoice}</code>\nProduk: ${escapeHtml(result.product.name)}\nTotal: ${money(result.total)}\nSisa saldo: ${money(result.balance)}\n\nData produk dikirim di bawah ini. Simpan dengan aman.`;
-    await ctx.reply(message, { parse_mode: 'HTML' });
-    for (const [index, stock] of result.stocks.entries()) {
-      await ctx.reply(`Data item ${index + 1}/${result.stocks.length}:\n${stock.content}`);
-    }
-    await safeAnswerCallback(ctx, 'Order berhasil!');
-    await safeEdit(ctx, `✅ Order <code>${result.invoice}</code> telah diproses dan data produk dikirim pada pesan baru.`, { parse_mode: 'HTML' });
-  });
-  bot.action(/^cancel:([a-f0-9]{24})$/, async (ctx) => { orderService.cancelIntent(ctx.match[1], ctx.from.id); await ctx.answerCbQuery('Dibatalkan.'); await safeEdit(ctx, 'Pembelian dibatalkan.'); });
-}
-module.exports = { registerProductHandlers, showList, replyList, showDetail, replyDetail, replyDetailByPosition, listText };
+const { Markup }=require('telegraf');
+const products=require('../services/productService'); const restock=require('../services/restockService'); const payment=require('../services/payment/placeholderProvider'); const orders=require('../services/orderService');
+const {productListKeyboard,productDetailKeyboard,variantKeyboard}=require('../keyboards/product'); const {money,escapeHtml}=require('../utils/format'); const {safeEdit,safeAnswerCallback}=require('../utils/telegram'); const {isValidProductCallback}=require('../utils/callback'); const {requirePositiveInteger}=require('../utils/validation');
+function listText(result,popular=false){const title=popular?'🔥 <b>PRODUK POPULER</b>':'<b>LIST PRODUCT</b>';const rows=result.items.map((p,i)=>`[${(result.page-1)*10+i+1}]. ${escapeHtml(p.name)} ( ${p.available_stock} )`);return `${title}\n\n${rows.join('\n')||'Belum ada produk aktif.'}\n\n📄 Halaman ${result.page} / ${result.pages}`;}
+function parentText(p){return `<b>${escapeHtml(p.name)}</b>\n\n${escapeHtml(p.description||'-')}\n\n<b>Total stok tersedia:</b> ${p.available_stock}\n\nPilih varian:`;}
+function detailText(v,q){return `<b>📦 Detail Produk</b>\n\n<b>Nama:</b> ${escapeHtml(v.product_name)}\n<b>Varian:</b> ${escapeHtml(v.name)}\n<b>Harga:</b> ${money(v.price)}\n<b>Stok varian:</b> ${v.available_stock}\n\n<b>Deskripsi:</b>\n${escapeHtml(v.description||'-')}\n\n<b>Jumlah pembelian:</b> ${q}\n<b>Total harga:</b> ${money(v.price*q)}`;}
+function quantity(ctx,id){const v=ctx.session.quantities?.[id];return Number.isSafeInteger(v)&&v>0?v:1;} function setQuantity(ctx,id,v){ctx.session.quantities||={};ctx.session.quantities[id]=v;}
+async function showList(ctx,page,popular=false){const result=products.listProducts(page,10,popular);await safeEdit(ctx,listText(result,popular),{parse_mode:'HTML',...productListKeyboard(result,popular)});} function replyList(ctx,page=1){const r=products.listProducts(page,10);return ctx.reply(listText(r),{parse_mode:'HTML',...productListKeyboard(r)});}
+async function renderVariant(ctx,v,edit=false){let q=Math.min(quantity(ctx,v.id),v.available_stock||1);setQuantity(ctx,v.id,q);ctx.session.activeVariantId=v.id;const extra={parse_mode:'HTML',...productDetailKeyboard(ctx.from.id,v.id,q,v.available_stock)};return edit?safeEdit(ctx,detailText(v,q),extra):ctx.reply(detailText(v,q),extra);}
+async function selectProduct(ctx,id,edit=false){const p=products.getProduct(id);if(!p?.is_active)return ctx.reply?.('Produk tidak aktif atau tidak ditemukan.');const variants=products.listVariants(id,true);if(variants.length===1)return renderVariant(ctx,products.getVariant(variants[0].id,true),edit);const extra={parse_mode:'HTML',...variantKeyboard(ctx.from.id,variants)};return edit?safeEdit(ctx,parentText(p),extra):ctx.reply(parentText(p),extra);}
+const showDetail=(ctx,id)=>selectProduct(ctx,id,true); const replyDetail=(ctx,id)=>selectProduct(ctx,id,false); async function replyDetailByPosition(ctx,pos){if(!Number.isSafeInteger(pos)||pos<=0)return ctx.reply('❌ Produk tidak tersedia. Silakan buka List Produk terbaru.');const p=products.activeProductAt(pos);return p?replyDetail(ctx,p.id):ctx.reply('❌ Produk tidak tersedia. Silakan buka List Produk terbaru.');}
+function valid(ctx,action,raw,sig,label='ID varian'){const id=requirePositiveInteger(raw,label);if(!isValidProductCallback(ctx.from.id,action,id,sig))throw new Error('Callback tidak valid.');return id;}
+function registerProductHandlers(bot){bot.action(/^products:(\d+)$/,async c=>{await c.answerCbQuery();await showList(c,Number(c.match[1]));});bot.action(/^popular:(\d+)$/,async c=>{await c.answerCbQuery();await showList(c,Number(c.match[1]),true);});
+ bot.action(/^variant:(\d+):([a-f0-9]{12})$/,async c=>{const id=valid(c,'variant',c.match[1],c.match[2]);const v=products.getVariant(id,true);if(!v)return c.answerCbQuery('Varian tidak tersedia.',{show_alert:true});await c.answerCbQuery();await renderVariant(c,v,true);});
+ bot.action(/^(minus|plus|reset):(\d+):([a-f0-9]{12})$/,async c=>{const [,a,r,s]=c.match,id=valid(c,a,r,s),v=products.getVariant(id,true);if(!v||c.session.activeVariantId!==id)return c.answerCbQuery('Pilihan varian tidak valid.',{show_alert:true});let q=quantity(c,id);if(a==='minus')q=Math.max(1,q-1);if(a==='plus')q=Math.min(v.available_stock||1,q+1);if(a==='reset')q=1;setQuantity(c,id,q);await c.answerCbQuery();await renderVariant(c,v,true);});bot.action('noop',c=>c.answerCbQuery());
+ bot.action(/^product:(\d+):([a-f0-9]{12})$/,async c=>{const variantId=valid(c,'product',c.match[1],c.match[2]);const v=products.getVariant(variantId);await c.answerCbQuery();if(v)await selectProduct(c,v.product_id,true);});
+ bot.action(/^restock:(\d+):([a-f0-9]{12})$/,async c=>{const id=valid(c,'restock',c.match[1],c.match[2]),v=products.getVariant(id,true);if(!v||v.available_stock>0)return c.answerCbQuery('Notifikasi hanya untuk varian kosong.',{show_alert:true});const active=restock.toggle(c.from.id,v.product_id);return c.answerCbQuery(active?'Notifikasi restok diaktifkan.':'Notifikasi restok dibatalkan.',{show_alert:true});});
+ bot.action(/^now:(\d+):([a-f0-9]{12})$/,async c=>{valid(c,'now',c.match[1],c.match[2]);const r=await payment.createPayment();await c.answerCbQuery();await c.reply(`ℹ️ ${r.message}`);});
+ bot.action(/^balance:(\d+):([a-f0-9]{12})$/,async c=>{const id=valid(c,'balance',c.match[1],c.match[2]),v=products.getVariant(id,true),q=quantity(c,id);if(!v||c.session.activeVariantId!==id||v.available_stock<q)return c.answerCbQuery('Quantity atau stok tidak valid.',{show_alert:true});let token;try{token=orders.createIntent(c.from.id,v.product_id,q,'balance',id);}catch(e){return c.answerCbQuery(e.message,{show_alert:true});}await c.answerCbQuery();await c.reply(`Konfirmasi <b>${escapeHtml(v.product_name)} — ${escapeHtml(v.name)}</b> x${q}, total <b>${money(v.price*q)}</b>?`,{parse_mode:'HTML',...Markup.inlineKeyboard([[Markup.button.callback('✅ Konfirmasi',`confirm:${token}`),Markup.button.callback('❌ Batal',`cancel:${token}`)]])});});
+ bot.action(/^confirm:([a-f0-9]{24})$/,async c=>{let r;try{r=orders.fulfillBalanceIntent(c.match[1],c.from.id);}catch(e){return safeAnswerCallback(c,e.message,{show_alert:true});}await c.reply(`✅ <b>Order Berhasil</b>\nInvoice: <code>${r.invoice}</code>\nProduk: ${escapeHtml(r.product.name)} — ${escapeHtml(r.variant.name)}\nTotal: ${money(r.total)}\nSisa saldo: ${money(r.balance)}`,{parse_mode:'HTML'});for(const [i,s] of r.stocks.entries())await c.reply(`Data item ${i+1}/${r.stocks.length}:\n${s.content}`);await safeAnswerCallback(c,'Order berhasil!');});bot.action(/^cancel:([a-f0-9]{24})$/,async c=>{orders.cancelIntent(c.match[1],c.from.id);await c.answerCbQuery('Dibatalkan.');await safeEdit(c,'Pembelian dibatalkan.');});}
+module.exports={registerProductHandlers,showList,replyList,showDetail,replyDetail,replyDetailByPosition,listText,detailText};

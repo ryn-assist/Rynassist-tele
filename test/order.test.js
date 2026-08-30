@@ -13,7 +13,7 @@ const users = require('../src/services/userService');
 const orders = require('../src/services/orderService');
 const restock = require('../src/services/restockService');
 const { numberRows } = require('../src/keyboards/main');
-const { productListKeyboard } = require('../src/keyboards/product');
+const { productListKeyboard, variantKeyboard } = require('../src/keyboards/product');
 const { listText } = require('../src/handlers/productHandler');
 
 function createUser(id, balance = 0) {
@@ -102,6 +102,40 @@ test('urutan produk aktif, teks pagination, dan keyboard angka selalu dinamis', 
   const buttons = productListKeyboard(result).reply_markup.inline_keyboard;
   assert.ok(buttons.flat().every((button) => !/^\d+\./.test(button.text)));
   if (result.pages > 1) assert.deepEqual(buttons[0].map((button) => button.text), ['➡️ Selanjutnya']);
+});
+
+test('produk multi-varian menjumlahkan stok aktif dan order tidak mencampur stok', () => {
+  createUser(127, 10000);
+  const productId = products.createProduct({ code: 'CANVA', name: 'CANVA', price: 100, description: 'Canva premium' });
+  const legacy = products.listVariants(productId)[0];
+  products.updateVariant(legacy.id, 'name', 'Canva Mem 1B');
+  const designId = products.createVariant(productId, 'Canva Design 1B', 250);
+  const eduId = products.createVariant(productId, 'Canva Edu 1B', 500);
+  products.addVariantStock(legacy.id, ['MEM-A', 'MEM-B']);
+  products.addVariantStock(designId, ['DESIGN-A']);
+  products.addVariantStock(eduId, ['EDU-A']);
+
+  assert.equal(products.getProduct(productId).available_stock, 4);
+  products.updateVariant(eduId, 'is_active', 0);
+  assert.equal(products.getProduct(productId).available_stock, 3);
+  const choices = variantKeyboard(127, products.listVariants(productId, true)).reply_markup.inline_keyboard.flat();
+  assert.ok(choices.some((button) => /Canva Design 1B/.test(button.text) && /^variant:/.test(button.callback_data)));
+
+  const token = orders.createIntent(127, productId, 1, 'balance', designId);
+  const result = orders.fulfillBalanceIntent(token, 127);
+  assert.equal(result.variant.id, designId);
+  assert.deepEqual(result.stocks.map((stock) => stock.content), ['DESIGN-A']);
+  assert.equal(products.getVariant(legacy.id).available_stock, 2);
+  assert.equal(getDb().prepare('SELECT variant_id FROM orders WHERE id=?').get(result.orderId).variant_id, designId);
+});
+
+test('produk API lama otomatis mempunyai default variant yang kompatibel', () => {
+  const productId = products.createProduct({ code: 'LEGACY_API', name: 'Produk Lama', price: 1234, description: '' });
+  const variants = products.listVariants(productId, true);
+  assert.equal(variants.length, 1);
+  assert.equal(variants[0].price, 1234);
+  products.addStock(productId, ['LEGACY-STOCK']);
+  assert.equal(products.getVariant(variants[0].id).available_stock, 1);
 });
 
 test.after(() => closeDb());
