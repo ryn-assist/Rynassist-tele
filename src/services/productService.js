@@ -28,6 +28,33 @@ function createProduct({ code, name, price, description }) {
   const cleanDescription = String(description ?? '').trim(); if (cleanDescription.length > 2000) throw new Error('Deskripsi maksimal 2000 karakter.');
   return getDb().transaction(() => { const productCode=requireProductCode(code); const id = getDb().prepare('INSERT INTO products(code,name,price,description) VALUES(?,?,?,?)').run(productCode, cleanName, cleanPrice, cleanDescription).lastInsertRowid; getDb().prepare('INSERT INTO product_variants(product_id,name,code,price,description) VALUES(?,?,?,?,?)').run(id, cleanName, `${productCode}-DEFAULT`, cleanPrice, cleanDescription); return id; }).immediate();
 }
+function categoryCode(category) {
+  return String(category).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'PRODUCT';
+}
+function addProductVariant({ code, category, name, price, description }) {
+  const variantCode = requireProductCode(code);
+  const categoryName = requireText(category, 'Kategori', 100);
+  const variantName = requireText(name, 'Nama', 100);
+  const variantPrice = requireNonNegativeInteger(price, 'Harga');
+  const desc = requireText(description || '-', 'Deskripsi', 2000);
+  return getDb().transaction(() => {
+    let product = getDb().prepare('SELECT * FROM products WHERE lower(trim(name))=lower(trim(?)) LIMIT 1').get(categoryName);
+    let createdProduct = false;
+    if (!product) {
+      const base = categoryCode(categoryName);
+      let productCode = base;
+      let n = 1;
+      while (getDb().prepare('SELECT 1 FROM products WHERE code=? COLLATE NOCASE').get(productCode)) productCode = `${base.slice(0,34)}-${++n}`;
+      const productId = getDb().prepare('INSERT INTO products(code,name,price,description) VALUES(?,?,?,?)').run(productCode, categoryName, variantPrice, desc).lastInsertRowid;
+      product = getDb().prepare('SELECT * FROM products WHERE id=?').get(productId);
+      createdProduct = true;
+    }
+    if (getDb().prepare('SELECT 1 FROM product_variants WHERE code=? COLLATE NOCASE').get(variantCode)) throw new Error('Kode produk/variasi sudah digunakan.');
+    const variantId = getDb().prepare('INSERT INTO product_variants(product_id,name,code,price,description) VALUES(?,?,?,?,?)').run(product.id, variantName, variantCode, variantPrice, desc).lastInsertRowid;
+    if (!createdProduct && (!product.description || product.description === '-')) getDb().prepare('UPDATE products SET description=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(desc, product.id);
+    return { productId: product.id, variantId, createdProduct };
+  }).immediate();
+}
 function updateProduct(id, field, value) {
   const productId = requirePositiveInteger(id, 'ID produk'); const allowed = new Set(['code', 'name', 'description', 'price', 'is_active']); if (!allowed.has(field)) throw new Error('Field edit tidak valid.');
   const validators = { code: requireProductCode, name: (v) => requireText(v, 'Nama produk', 100), description: (v) => { const t=String(v??'').trim(); if(t.length>2000) throw new Error('Deskripsi maksimal 2000 karakter.'); return t; }, price: (v) => requireNonNegativeInteger(v, 'Harga'), is_active: (v) => { const n=Number(v); if(![0,1].includes(n)) throw new Error('is_active hanya boleh 0 atau 1.'); return n; } };
@@ -42,4 +69,4 @@ function deleteVariant(id) { return updateVariant(id,'is_active',0); }
 function addVariantStock(variantId, contents) { const variant=getVariant(variantId); if(!variant) throw new Error('Varian tidak ditemukan.'); if(!Array.isArray(contents)||!contents.length||contents.length>100) throw new Error('Restock harus berisi 1-100 item.'); const clean=contents.map(v=>requireText(v,'Item stok',3000)); return getDb().transaction(()=>{const insert=getDb().prepare('INSERT INTO stock_items(product_id,variant_id,content) VALUES(?,?,?)'); for(const content of clean)insert.run(variant.product_id,variant.id,content);return clean.length;}).immediate(); }
 function addStock(productId, contents) { const variants=listVariants(productId,true); if(variants.length!==1) throw new Error('Produk memiliki beberapa varian; gunakan /restockvariant VARIANT_ID.'); return addVariantStock(variants[0].id,contents); }
 function stockSummary(){return getDb().prepare(`${PRODUCT_SELECT} GROUP BY p.id ORDER BY p.id`).all();}
-module.exports={listProducts,activeProducts,activeProductCount,activeProductAt,activeStockSummary,getProduct,getProductByCode,createProduct,updateProduct,deleteProduct,listVariants,getVariant,createVariant,updateVariant,deleteVariant,addVariantStock,addStock,stockSummary};
+module.exports={listProducts,activeProducts,activeProductCount,activeProductAt,activeStockSummary,getProduct,getProductByCode,createProduct,addProductVariant,updateProduct,deleteProduct,listVariants,getVariant,createVariant,updateVariant,deleteVariant,addVariantStock,addStock,stockSummary};
