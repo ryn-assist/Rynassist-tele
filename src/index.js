@@ -7,6 +7,7 @@ const { registerAdminCommands } = require('./commands/admin');
 const { registerProductHandlers } = require('./handlers/productHandler');
 const { registerAccountHandlers } = require('./handlers/accountHandler');
 const { registerMenuHandlers } = require('./handlers/menuHandler');
+const { startWebhookServer } = require('./server');
 
 const BOT_COMMANDS = [
   { command: 'start', description: 'Mulai dan buka menu' },
@@ -19,6 +20,7 @@ const BOT_COMMANDS = [
 
 validateConfig(); getDb();
 const bot = new Telegraf(config.botToken);
+const webhookServer = startWebhookServer(bot);
 bot.use(session({ defaultSession: () => ({ quantities: {}, productPage: [] }) }));
 bot.use(async (ctx, next) => {
   if (ctx.from) userService.upsertUser(ctx.from);
@@ -31,6 +33,6 @@ bot.telegram.setMyCommands(BOT_COMMANDS).then(() => bot.launch()).then(() => con
   closeDb();
   process.exitCode = 1;
 });
-function shutdown(signal) { console.log(`${signal}: menutup bot…`); bot.stop(signal); closeDb(); }
+function shutdown(signal) { console.log(`${signal}: menutup bot…`); bot.stop(signal); webhookServer?.close(); closeDb(); }
 process.once('SIGINT', () => shutdown('SIGINT')); process.once('SIGTERM', () => shutdown('SIGTERM'));
 module.exports = { bot, BOT_COMMANDS };

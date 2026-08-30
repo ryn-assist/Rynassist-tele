@@ -12,6 +12,7 @@ const products = require('../src/services/productService');
 const users = require('../src/services/userService');
 const orders = require('../src/services/orderService');
 const restock = require('../src/services/restockService');
+const payments = require('../src/services/paymentService');
 const { numberRows } = require('../src/keyboards/main');
 const { productListKeyboard, variantKeyboard } = require('../src/keyboards/product');
 const { listText } = require('../src/handlers/productHandler');
@@ -62,12 +63,16 @@ test('intent menolak quantity dan produk yang tidak valid', () => {
   assert.throws(() => orders.createIntent(125, id, 1), /tidak aktif/);
 });
 
-test('restock tidak menerima item duplikat dan subscription tetap unik', () => {
+test('restock menerima setiap item duplikat sebagai unit dan subscription tetap unik', () => {
   createUser(126);
   const id = products.createProduct({ code: 'RESTOCK', name: 'Restock', price: 1000, description: '' });
-  assert.throws(() => products.addStock(id, ['SAMA', 'SAMA']), /duplikat/);
-  products.addStock(id, ['SAMA']);
-  assert.throws(() => products.addStock(id, ['SAMA']), /sudah pernah/);
+  products.addStock(id, ['SAMA', 'SAMA', 'SAMA']);
+  assert.equal(products.getProduct(id).available_stock, 3);
+  createUser(226, 5000);
+  const first=orders.fulfillBalanceIntent(orders.createIntent(226,id,1),226);
+  const second=orders.fulfillBalanceIntent(orders.createIntent(226,id,1),226);
+  assert.equal(first.stocks[0].content,'SAMA'); assert.equal(second.stocks[0].content,'SAMA');
+  assert.equal(products.getProduct(id).available_stock, 1);
   assert.equal(restock.toggle(126, id), true);
   assert.equal(getDb().prepare('SELECT COUNT(*) count FROM restock_subscriptions WHERE user_id=126 AND product_id=?').get(id).count, 1);
   assert.equal(restock.toggle(126, id), false);
@@ -136,6 +141,32 @@ test('produk API lama otomatis mempunyai default variant yang kompatibel', () =>
   assert.equal(variants[0].price, 1234);
   products.addStock(productId, ['LEGACY-STOCK']);
   assert.equal(products.getVariant(variants[0].id).available_stock, 1);
+});
+
+
+test('harga dikalkulasi ulang saat konfirmasi saldo dan saldo kurang tidak mengambil stok', () => {
+  createUser(130, 5000); createUser(131, 50);
+  const id=products.createProduct({code:'REPRICE',name:'Reprice',price:100,description:''});
+  products.addStock(id,['R1','R2']); const variant=products.listVariants(id,true)[0];
+  const token=orders.createIntent(130,id,1); products.updateVariant(variant.id,'price',750);
+  const result=orders.fulfillBalanceIntent(token,130); assert.equal(result.total,750);
+  const poor=orders.createIntent(131,id,1); assert.throws(()=>orders.fulfillBalanceIntent(poor,131),/Saldo/);
+  assert.equal(products.getVariant(variant.id).available_stock,1);
+});
+
+test('payment pending tidak konsumsi stok, nominal benar, paid idempotent, dan terisolasi antar varian', async () => {
+  createUser(132); const id=products.createProduct({code:'PAYMENT',name:'Payment',price:300,description:''});
+  const a=products.listVariants(id,true)[0], b=products.createVariant(id,'B',900,'PAY-B','B desc');
+  products.addVariantStock(a.id,['A-SAME']); products.addVariantStock(b,['B-ONLY']);
+  const token=orders.createIntent(132,id,1,'pakasir',a.id); let received;
+  const provider={name:'pakasir',async createPayment(input){received=input;return{reference:input.reference,qrString:'mock-qr',raw:{mock:true}};}};
+  const created=await payments.createPayment(token,132,provider); assert.equal(received.amount,300);
+  assert.equal(products.getVariant(a.id).available_stock,1);
+  const paid=payments.fulfillVerified(created.reference,{status:'paid',amount:300});
+  assert.deepEqual(paid.stocks.map(x=>x.content),['A-SAME']);
+  assert.equal(products.getVariant(b).available_stock,1);
+  const duplicate=payments.fulfillVerified(created.reference,{status:'paid',amount:300});
+  assert.equal(duplicate.duplicate,true); assert.equal(getDb().prepare('SELECT COUNT(*) count FROM order_items WHERE order_id=?').get(paid.orderId).count,1);
 });
 
 test.after(() => closeDb());

@@ -16,11 +16,20 @@ const config = {
   databasePath: path.resolve(process.cwd(), process.env.DATABASE_PATH || './data/rynassist.db'),
   storeName: process.env.STORE_NAME || 'RynAssist',
   currency: process.env.CURRENCY || 'Rp'
+  ,paymentProvider: (process.env.PAYMENT_PROVIDER || 'pakasir').toLowerCase()
+  ,pakasirSlug: process.env.PAKASIR_SLUG || ''
+  ,pakasirApiKey: process.env.PAKASIR_API_KEY || ''
+  ,midtransServerKey: process.env.MIDTRANS_SERVER_KEY || ''
+  ,midtransClientKey: process.env.MIDTRANS_CLIENT_KEY || ''
+  ,midtransProduction: String(process.env.MIDTRANS_IS_PRODUCTION).toLowerCase() === 'true'
+  ,paymentBaseUrl: process.env.PAYMENT_BASE_URL || ''
+  ,port: Number(process.env.PORT || 0)
 };
 
 function validateConfig() {
   if (!config.botToken) throw new Error('BOT_TOKEN wajib diisi di file .env');
   if (config.adminIds.size === 0) console.warn('Peringatan: ADMIN_IDS kosong; fitur admin tidak dapat digunakan.');
+  if (!['pakasir','midtrans'].includes(config.paymentProvider)) throw new Error('PAYMENT_PROVIDER harus pakasir atau midtrans.');
 }
 
 module.exports = { config, validateConfig, parseAdminIds };

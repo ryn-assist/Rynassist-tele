@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS product_variants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  code TEXT,
+  description TEXT NOT NULL DEFAULT '',
   price INTEGER NOT NULL CHECK (price >= 0),
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -86,6 +88,23 @@ CREATE TABLE IF NOT EXISTS purchase_intents (
   order_id INTEGER REFERENCES orders(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id) ON DELETE RESTRICT,
+  provider TEXT NOT NULL,
+  provider_reference TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount >= 0),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','expired','failed','cancelled','paid_stock_issue')),
+  qr_string TEXT,
+  payment_url TEXT,
+  raw_response TEXT,
+  expires_at TEXT,
+  fulfilled_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(provider, provider_reference)
 );
 
 CREATE TABLE IF NOT EXISTS restock_subscriptions (
