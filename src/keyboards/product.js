@@ -1,14 +1,12 @@
 const { Markup } = require('telegraf');
 const { productCallback } = require('../utils/callback');
 
-function productListKeyboard(result, userId, popular = false) {
-  const rows = result.items.map((product, index) => [Markup.button.callback(`${(result.page - 1) * 10 + index + 1}. ${product.name} (${product.available_stock})`, productCallback(userId, 'product', product.id))]);
+function productListKeyboard(result, popular = false) {
+  const rows = [];
   const nav = [];
   if (result.page > 1) nav.push(Markup.button.callback('⬅️ Sebelumnya', `${popular ? 'popular' : 'products'}:${result.page - 1}`));
   if (result.page < result.pages) nav.push(Markup.button.callback('➡️ Selanjutnya', `${popular ? 'popular' : 'products'}:${result.page + 1}`));
   if (nav.length) rows.push(nav);
-  rows.push([Markup.button.callback('🔥 Produk Populer', 'popular:1')]);
-  rows.push([Markup.button.callback('🏠 Menu Utama', 'menu:main')]);
   return Markup.inlineKeyboard(rows);
 }
 

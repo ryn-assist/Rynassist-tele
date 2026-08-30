@@ -17,20 +17,20 @@ function quantity(ctx, productId) {
   return Number.isSafeInteger(value) && value > 0 ? value : 1;
 }
 function setQuantity(ctx, productId, value) { ctx.session.quantities ||= {}; ctx.session.quantities[productId] = value; }
+function listText(result, popular = false) {
+  const title = popular ? '🔥 <b>PRODUK POPULER</b>' : '<b>LIST PRODUCT</b>';
+  const rows = result.items.map((product, index) => `[${(result.page - 1) * 10 + index + 1}]. ${escapeHtml(product.name)} ( ${product.available_stock} )`);
+  const products = rows.length ? rows.join('\n') : 'Belum ada produk aktif.';
+  return `${title}\n\n${products}\n\n📄 Halaman ${result.page} / ${result.pages}`;
+}
 
 async function showList(ctx, page, popular = false) {
   const result = productService.listProducts(page, 10, popular);
-  ctx.session.productPage = result.items.map((p) => p.id);
-  const title = popular ? '🔥 <b>Produk Populer</b>' : '📦 <b>List Produk</b>';
-  const instruction = result.items.length ? `Pilih produk melalui tombol atau kirim nomor 1-${result.items.length}.` : 'Belum ada produk aktif.';
-  const text = `${title}\n\n${instruction}\nHalaman ${result.page}/${result.pages}`;
-  await safeEdit(ctx, text, { parse_mode: 'HTML', ...productListKeyboard(result, ctx.from.id, popular) });
+  await safeEdit(ctx, listText(result, popular), { parse_mode: 'HTML', ...productListKeyboard(result, popular) });
 }
 async function replyList(ctx, page = 1) {
   const result = productService.listProducts(page, 10);
-  ctx.session.productPage = result.items.map((product) => product.id);
-  const instruction = result.items.length ? `Pilih produk melalui tombol atau kirim nomor 1-${result.items.length}.` : 'Belum ada produk aktif.';
-  return ctx.reply(`📦 <b>List Produk</b>\n\n${instruction}\nHalaman ${result.page}/${result.pages}`, { parse_mode: 'HTML', ...productListKeyboard(result, ctx.from.id, false) });
+  return ctx.reply(listText(result), { parse_mode: 'HTML', ...productListKeyboard(result) });
 }
 async function showDetail(ctx, productId) {
   const product = productService.getProduct(productId);
@@ -48,6 +48,12 @@ async function replyDetail(ctx, productId) {
   setQuantity(ctx, productId, qty);
   ctx.session.activeProductId = productId;
   return ctx.reply(detailText(product, qty), { parse_mode: 'HTML', ...productDetailKeyboard(ctx.from.id, productId, qty, product.available_stock) });
+}
+async function replyDetailByPosition(ctx, position) {
+  if (!Number.isSafeInteger(position) || position <= 0) return ctx.reply('❌ Produk tidak tersedia. Silakan buka List Produk terbaru.');
+  const product = productService.activeProductAt(position);
+  if (!product) return ctx.reply('❌ Produk tidak tersedia. Silakan buka List Produk terbaru.');
+  return replyDetail(ctx, product.id);
 }
 function validSignedCallback(ctx, action, rawId, suppliedSignature) {
   const id = requirePositiveInteger(rawId, 'ID produk');
@@ -97,4 +103,4 @@ function registerProductHandlers(bot) {
   });
   bot.action(/^cancel:([a-f0-9]{24})$/, async (ctx) => { orderService.cancelIntent(ctx.match[1], ctx.from.id); await ctx.answerCbQuery('Dibatalkan.'); await safeEdit(ctx, 'Pembelian dibatalkan.'); });
 }
-module.exports = { registerProductHandlers, showList, replyList, showDetail, replyDetail };
+module.exports = { registerProductHandlers, showList, replyList, showDetail, replyDetail, replyDetailByPosition, listText };

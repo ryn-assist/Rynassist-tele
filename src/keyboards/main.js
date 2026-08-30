@@ -1,22 +1,23 @@
 const { Markup } = require('telegraf');
+const productService = require('../services/productService');
 
-const MAIN_KEYBOARD_ROWS = [
-  ['🏷️ List Produk', '📮 Voucher', '🗂️ Laporan Stok'],
-  ['1', '2', '3', '4', '5'],
-  ['6', '7', '8', '9', '10'],
-  ['11', '12', '13', '14', '15'],
-  ['16', '17', '18', '19', '20'],
-  ['21', '22', '23', '24', '25'],
-  ['💰 Deposit', '❔ Cara Order'],
-  ['⚠️ Information', '📜 Riwayat']
-];
-
-function mainKeyboard() {
-  const keyboard = Markup.keyboard(MAIN_KEYBOARD_ROWS)
-    .resize(true)
-    .oneTime(false);
-  keyboard.reply_markup.is_persistent = true;
-  return keyboard;
+function numberRows(productCount) {
+  const numbers = Array.from({ length: productCount }, (_, index) => String(index + 1));
+  const rows = [];
+  for (let index = 0; index < numbers.length; index += 5) rows.push(numbers.slice(index, index + 5));
+  return rows;
 }
 
-module.exports = { MAIN_KEYBOARD_ROWS, mainKeyboard };
+function mainKeyboard() {
+  const rows = [
+    ['🏷️ List Produk', '📮 Voucher', '🗂️ Laporan Stok'],
+    ...numberRows(productService.activeProductCount()),
+    ['💰 Deposit', '❔ Cara Order'],
+    ['⚠️ Information', '📜 Riwayat']
+  ];
+  return Markup.keyboard(rows)
+    .resize(true)
+    .oneTime(false);
+}
+
+module.exports = { numberRows, mainKeyboard };

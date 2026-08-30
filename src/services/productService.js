@@ -3,6 +3,7 @@ const { requirePositiveInteger, requireNonNegativeInteger, requireText, requireP
 
 const PRODUCT_SELECT = `SELECT p.*, COUNT(CASE WHEN s.status='available' THEN 1 END) available_stock,
   COUNT(s.id) total_stock FROM products p LEFT JOIN stock_items s ON s.product_id=p.id`;
+const ACTIVE_PRODUCT_ORDER = 'p.id ASC';
 
 function listProducts(page = 1, limit = 10, popular = false) {
   const safeLimit = Math.min(requirePositiveInteger(limit, 'Limit'), 10);
@@ -10,15 +11,21 @@ function listProducts(page = 1, limit = 10, popular = false) {
   const pages = Math.max(1, Math.ceil(total / safeLimit));
   const safePage = Math.min(requirePositiveInteger(page, 'Halaman'), pages);
   const offset = (safePage - 1) * safeLimit;
-  const order = popular ? 'p.sold_count DESC, p.id ASC' : 'p.id ASC';
+  const order = popular ? 'p.sold_count DESC, p.id ASC' : ACTIVE_PRODUCT_ORDER;
   const items = getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY ${order} LIMIT ? OFFSET ?`).all(safeLimit, offset);
   return { items, total, pages, page: safePage };
 }
 function getProduct(id) { return getDb().prepare(`${PRODUCT_SELECT} WHERE p.id=? GROUP BY p.id`).get(id); }
 function getProductByCode(code) { return getDb().prepare(`${PRODUCT_SELECT} WHERE p.code=? GROUP BY p.id`).get(code); }
-function activeProducts(limit = 25) {
-  const safeLimit = Math.min(requirePositiveInteger(limit, 'Limit'), 25);
-  return getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY p.id ASC LIMIT ?`).all(safeLimit);
+function activeProducts() {
+  return getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY ${ACTIVE_PRODUCT_ORDER}`).all();
+}
+function activeProductCount() {
+  return getDb().prepare('SELECT COUNT(*) count FROM products WHERE is_active=1').get().count;
+}
+function activeProductAt(position) {
+  const offset = requirePositiveInteger(position, 'Nomor produk') - 1;
+  return getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY ${ACTIVE_PRODUCT_ORDER} LIMIT 1 OFFSET ?`).get(offset);
 }
 function activeStockSummary() { return getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY p.id ASC`).all(); }
 function createProduct({ code, name, price, description }) {
@@ -65,4 +72,4 @@ function addStock(productId, contents) {
 function stockSummary() {
   return getDb().prepare(`${PRODUCT_SELECT} GROUP BY p.id ORDER BY p.id`).all();
 }
-module.exports = { listProducts, activeProducts, activeStockSummary, getProduct, getProductByCode, createProduct, updateProduct, deleteProduct, addStock, stockSummary };
+module.exports = { listProducts, activeProducts, activeProductCount, activeProductAt, activeStockSummary, getProduct, getProductByCode, createProduct, updateProduct, deleteProduct, addStock, stockSummary };

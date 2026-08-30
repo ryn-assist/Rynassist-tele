@@ -4,7 +4,7 @@ const { getDb, closeDb } = require('./database');
 const userService = require('./services/userService');
 const { registerStart } = require('./commands/start');
 const { registerAdminCommands } = require('./commands/admin');
-const { registerProductHandlers, replyDetail } = require('./handlers/productHandler');
+const { registerProductHandlers } = require('./handlers/productHandler');
 const { registerAccountHandlers } = require('./handlers/accountHandler');
 const { registerMenuHandlers } = require('./handlers/menuHandler');
 
@@ -25,14 +25,6 @@ bot.use(async (ctx, next) => {
   return next();
 });
 registerStart(bot); registerAdminCommands(bot); registerProductHandlers(bot); registerAccountHandlers(bot); registerMenuHandlers(bot);
-bot.on('text', async (ctx, next) => {
-  if (ctx.message.text.startsWith('/')) return next();
-  if (/^([1-9]|1\d|2[0-5])$/.test(ctx.message.text)) return next();
-  if (!/^\d+$/.test(ctx.message.text) || !ctx.session.productPage.length) return next();
-  const position = Number(ctx.message.text); const id = ctx.session.productPage[position - 1];
-  if (!id) return ctx.reply('Nomor produk tidak valid untuk halaman terakhir yang Anda buka.');
-  await replyDetail(ctx, id);
-});
 bot.catch((error, ctx) => { console.error(`Bot error pada update ${ctx.update.update_id}:`, error); ctx.reply('Terjadi kesalahan. Silakan coba lagi.').catch(() => {}); });
 bot.telegram.setMyCommands(BOT_COMMANDS).then(() => bot.launch()).then(() => console.log(`${config.storeName} aktif.`)).catch((error) => {
   console.error('Gagal menjalankan bot:', error);
