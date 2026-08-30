@@ -2,21 +2,25 @@ const crypto = require('node:crypto');
 const { getDb } = require('../database');
 const { requirePositiveInteger } = require('../utils/validation');
 
-function createIntent(userId, productId, quantity, paymentMethod = 'balance') {
+function createIntent(userId, productId, quantity, paymentMethod = 'balance', variantId = null) {
   const safeUserId = requirePositiveInteger(userId, 'Telegram user ID');
   const safeProductId = requirePositiveInteger(productId, 'ID produk');
   const safeQuantity = requirePositiveInteger(quantity, 'Quantity');
   if (paymentMethod !== 'balance') throw new Error('Metode pembayaran intent tidak didukung.');
   if (!getDb().prepare('SELECT 1 FROM users WHERE telegram_id=?').get(safeUserId)) throw new Error('User tidak ditemukan.');
-  const product = getDb().prepare('SELECT id,price FROM products WHERE id=? AND is_active=1').get(safeProductId);
+  const product = getDb().prepare('SELECT id FROM products WHERE id=? AND is_active=1').get(safeProductId);
   if (!product) throw new Error('Produk tidak aktif atau tidak ditemukan.');
-  const stock = getDb().prepare("SELECT COUNT(*) count FROM stock_items WHERE product_id=? AND status='available'").get(safeProductId).count;
+  const variants = getDb().prepare('SELECT id,name,price FROM product_variants WHERE product_id=? AND is_active=1 ORDER BY id').all(safeProductId);
+  const selectedId = variantId == null && variants.length === 1 ? variants[0]?.id : requirePositiveInteger(variantId, 'ID varian');
+  const variant = variants.find((row) => row.id === selectedId);
+  if (!variant) throw new Error('Varian tidak aktif atau tidak ditemukan.');
+  const stock = getDb().prepare("SELECT COUNT(*) count FROM stock_items WHERE variant_id=? AND status='available'").get(variant.id).count;
   if (safeQuantity > stock) throw new Error('Quantity melebihi stok tersedia.');
-  const total = product.price * safeQuantity;
+  const total = variant.price * safeQuantity;
   if (!Number.isSafeInteger(total)) throw new Error('Total harga berada di luar rentang aman.');
   const token = crypto.randomBytes(12).toString('hex');
-  getDb().prepare(`INSERT INTO purchase_intents(token,user_id,product_id,quantity,unit_price,payment_method,expires_at)
-    VALUES(?,?,?,?,?,?,datetime('now','+10 minutes'))`).run(token, safeUserId, safeProductId, safeQuantity, product.price, paymentMethod);
+  getDb().prepare(`INSERT INTO purchase_intents(token,user_id,product_id,variant_id,quantity,unit_price,payment_method,expires_at)
+    VALUES(?,?,?,?,?,?,?,datetime('now','+10 minutes'))`).run(token, safeUserId, safeProductId, variant.id, safeQuantity, variant.price, paymentMethod);
   return token;
 }
 
@@ -34,15 +38,17 @@ function fulfillBalanceIntent(token, userId) {
     if (claimed.changes !== 1) throw new Error('Pembelian ini sedang/sudah diproses.');
     const product = getDb().prepare('SELECT * FROM products WHERE id=? AND is_active=1').get(intent.product_id);
     if (!product) throw new Error('Produk tidak tersedia.');
-    const stocks = getDb().prepare("SELECT id,content FROM stock_items WHERE product_id=? AND status='available' ORDER BY id LIMIT ?").all(product.id, quantity);
+    const variant = getDb().prepare('SELECT * FROM product_variants WHERE id=? AND product_id=? AND is_active=1').get(intent.variant_id, product.id);
+    if (!variant) throw new Error('Varian tidak tersedia.');
+    const stocks = getDb().prepare("SELECT id,content FROM stock_items WHERE variant_id=? AND status='available' ORDER BY id LIMIT ?").all(variant.id, quantity);
     if (stocks.length !== quantity) throw new Error('Stok tidak mencukupi. Silakan pilih quantity lain.');
     const total = unitPrice * quantity;
     if (!Number.isSafeInteger(total)) throw new Error('Total harga berada di luar rentang aman.');
     const debit = getDb().prepare('UPDATE users SET balance=balance-?, updated_at=CURRENT_TIMESTAMP WHERE telegram_id=? AND balance>=?').run(total, safeUserId, total);
     if (debit.changes !== 1) throw new Error('Saldo tidak mencukupi.');
     const invoice = `RYN-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const orderId = getDb().prepare(`INSERT INTO orders(invoice,user_id,product_id,quantity,unit_price,total_price,payment_method,status,paid_at)
-      VALUES(?,?,?,?,?,?,'balance','paid',CURRENT_TIMESTAMP)`).run(invoice, safeUserId, product.id, quantity, unitPrice, total).lastInsertRowid;
+    const orderId = getDb().prepare(`INSERT INTO orders(invoice,user_id,product_id,variant_id,quantity,unit_price,total_price,payment_method,status,paid_at)
+      VALUES(?,?,?,?,?,?,?,'balance','paid',CURRENT_TIMESTAMP)`).run(invoice, safeUserId, product.id, variant.id, quantity, unitPrice, total).lastInsertRowid;
     const sell = getDb().prepare("UPDATE stock_items SET status='sold',order_id=?,sold_at=CURRENT_TIMESTAMP WHERE id=? AND status='available'");
     const item = getDb().prepare('INSERT INTO order_items(order_id,stock_item_id,delivered_content) VALUES(?,?,?)');
     for (const stock of stocks) {
@@ -53,12 +59,12 @@ function fulfillBalanceIntent(token, userId) {
     const balance = getDb().prepare('SELECT balance FROM users WHERE telegram_id=?').get(safeUserId).balance;
     getDb().prepare('INSERT INTO balance_logs(user_id,amount,balance_after,note) VALUES(?,?,?,?)').run(safeUserId, -total, balance, `Pembelian ${invoice}`);
     getDb().prepare("UPDATE purchase_intents SET status='completed',order_id=? WHERE token=?").run(orderId, token);
-    return { orderId, invoice, product, stocks, total, balance };
+    return { orderId, invoice, product, variant, stocks, total, balance };
   }).immediate();
 }
 function cancelIntent(token, userId) {
   return getDb().prepare("UPDATE purchase_intents SET status='expired' WHERE token=? AND user_id=? AND status='pending'").run(token, userId).changes === 1;
 }
-function listOrders(limit = 30) { return getDb().prepare(`SELECT o.*,p.name,u.username FROM orders o JOIN products p ON p.id=o.product_id JOIN users u ON u.telegram_id=o.user_id ORDER BY o.id DESC LIMIT ?`).all(limit); }
-function userOrders(userId, limit = 10) { return getDb().prepare(`SELECT o.*,p.name FROM orders o JOIN products p ON p.id=o.product_id WHERE o.user_id=? ORDER BY o.id DESC LIMIT ?`).all(userId, limit); }
+function listOrders(limit = 30) { return getDb().prepare(`SELECT o.*,p.name,v.name variant_name,u.username FROM orders o JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id JOIN users u ON u.telegram_id=o.user_id ORDER BY o.id DESC LIMIT ?`).all(limit); }
+function userOrders(userId, limit = 10) { return getDb().prepare(`SELECT o.*,p.name,v.name variant_name FROM orders o JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id WHERE o.user_id=? ORDER BY o.id DESC LIMIT ?`).all(userId, limit); }
 module.exports = { createIntent, fulfillBalanceIntent, cancelIntent, listOrders, userOrders };
