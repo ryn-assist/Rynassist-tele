@@ -8,12 +8,12 @@ const PRODUCT_SELECT = `SELECT p.*,
   COUNT(CASE WHEN v.is_active=1 THEN s.id END) total_stock
   FROM products p LEFT JOIN product_variants v ON v.product_id=p.id
   LEFT JOIN stock_items s ON s.variant_id=v.id`;
-const ACTIVE_PRODUCT_ORDER = 'p.id ASC';
+const ACTIVE_PRODUCT_ORDER = 'p.name COLLATE NOCASE ASC, p.id ASC';
 function listProducts(page = 1, limit = 10, popular = false) {
   const safeLimit = Math.min(requirePositiveInteger(limit, 'Limit'), 10);
   const total = getDb().prepare('SELECT COUNT(*) count FROM products WHERE is_active=1').get().count;
   const pages = Math.max(1, Math.ceil(total / safeLimit)); const safePage = Math.min(requirePositiveInteger(page, 'Halaman'), pages);
-  const order = popular ? 'p.sold_count DESC, p.id ASC' : ACTIVE_PRODUCT_ORDER;
+  const order = popular ? 'p.sold_count DESC, p.name COLLATE NOCASE ASC, p.id ASC' : ACTIVE_PRODUCT_ORDER;
   const items = getDb().prepare(`${PRODUCT_SELECT} WHERE p.is_active=1 GROUP BY p.id ORDER BY ${order} LIMIT ? OFFSET ?`).all(safeLimit, (safePage - 1) * safeLimit);
   return { items, total, pages, page: safePage };
 }
@@ -68,5 +68,5 @@ function updateVariant(id, field, value) { const variantId=requirePositiveIntege
 function deleteVariant(id) { return updateVariant(id,'is_active',0); }
 function addVariantStock(variantId, contents) { const variant=getVariant(variantId); if(!variant) throw new Error('Varian tidak ditemukan.'); if(!Array.isArray(contents)||!contents.length||contents.length>100) throw new Error('Restock harus berisi 1-100 item.'); const clean=contents.map(v=>requireText(v,'Item stok',3000)); return getDb().transaction(()=>{const insert=getDb().prepare('INSERT INTO stock_items(product_id,variant_id,content) VALUES(?,?,?)'); for(const content of clean)insert.run(variant.product_id,variant.id,content);return clean.length;}).immediate(); }
 function addStock(productId, contents) { const variants=listVariants(productId,true); if(variants.length!==1) throw new Error('Produk memiliki beberapa varian; gunakan /restockvariant VARIANT_ID.'); return addVariantStock(variants[0].id,contents); }
-function stockSummary(){return getDb().prepare(`${PRODUCT_SELECT} GROUP BY p.id ORDER BY p.id`).all();}
+function stockSummary(){return getDb().prepare(`${PRODUCT_SELECT} GROUP BY p.id ORDER BY p.name COLLATE NOCASE ASC, p.id ASC`).all();}
 module.exports={listProducts,activeProducts,activeProductCount,activeProductAt,activeStockSummary,getProduct,getProductByCode,createProduct,addProductVariant,updateProduct,deleteProduct,listVariants,getVariant,createVariant,updateVariant,deleteVariant,addVariantStock,addStock,stockSummary};
