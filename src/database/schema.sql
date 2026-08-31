@@ -44,10 +44,7 @@ CREATE TABLE IF NOT EXISTS stock_items (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sold_at TEXT,
   UNIQUE (id, order_id),
-  CHECK (
-    (status = 'sold' AND order_id IS NOT NULL AND sold_at IS NOT NULL)
-    OR (status != 'sold' AND order_id IS NULL AND sold_at IS NULL)
-  )
+  CHECK ((status = 'sold' AND order_id IS NOT NULL AND sold_at IS NOT NULL) OR (status != 'sold' AND order_id IS NULL AND sold_at IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_stock_product_status ON stock_items(product_id, status, id);
 
@@ -106,6 +103,25 @@ CREATE TABLE IF NOT EXISTS payments (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(provider, provider_reference)
 );
+
+CREATE TABLE IF NOT EXISTS deposits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reference TEXT NOT NULL UNIQUE,
+  user_id INTEGER NOT NULL REFERENCES users(telegram_id),
+  provider TEXT NOT NULL,
+  provider_reference TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount >= 1000),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','expired','failed','cancelled')),
+  qr_string TEXT,
+  payment_url TEXT,
+  raw_response TEXT,
+  expires_at TEXT,
+  credited_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(provider, provider_reference)
+);
+CREATE INDEX IF NOT EXISTS idx_deposits_user ON deposits(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS restock_subscriptions (
   user_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
