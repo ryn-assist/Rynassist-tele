@@ -7,7 +7,10 @@ function formatWib(date=new Date()){
 function methodLabel(method){return String(method||'').toLowerCase()==='balance'?'Saldo':'QRIS auto';}
 function stockDetail(stock,index){
   const content=String(stock?.content??'').trim();
-  return `${index+1}. Email : ${content}\n- password : `;
+  const separator=content.indexOf('|');
+  const email=separator>=0?content.slice(0,separator).trim():content;
+  const password=separator>=0?content.slice(separator+1).trim():'';
+  return `${index+1}. Email : ${email}\n- password : ${password}`;
 }
 function transactionSuccessText(data){
   const stocks=Array.isArray(data.stocks)?data.stocks:[];
