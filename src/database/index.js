@@ -24,7 +24,7 @@ function hasColumn(database, table, column) { return database.prepare(`PRAGMA ta
 function migrateVariants(database) {
   for (const table of ['stock_items', 'orders', 'purchase_intents']) if (!hasColumn(database, table, 'variant_id')) database.exec(`ALTER TABLE ${table} ADD COLUMN variant_id INTEGER REFERENCES product_variants(id)`);
   const additions = {
-    product_variants: [['code', 'TEXT'], ['description', "TEXT NOT NULL DEFAULT ''"], ['post_purchase_message', 'TEXT']],
+    product_variants: [['code', 'TEXT'], ['description', "TEXT NOT NULL DEFAULT ''"], ['post_purchase_message', 'TEXT'], ['bulk_tiers', 'TEXT']],
     purchase_intents: [['note', 'TEXT']],
     orders: [['variant_name', 'TEXT'], ['product_name', 'TEXT'], ['note', 'TEXT'], ['provider_reference', 'TEXT'], ['payment_status', "TEXT NOT NULL DEFAULT 'paid'"], ['fulfilled_at', 'TEXT']]
   };
