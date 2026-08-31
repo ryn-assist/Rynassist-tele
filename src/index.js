@@ -16,6 +16,8 @@ const BOT_COMMANDS = [
   { command: 'products', description: 'List produk' },
   { command: 'wallet', description: 'Cek saldo' },
   { command: 'orders', description: 'Riwayat pesanan' },
+  { command: 'deposit', description: 'Deposit saldo' },
+  { command: 'voucher', description: 'Redeem voucher' },
   { command: 'help', description: 'Hubungi owner / bantuan' }
 ];
 
