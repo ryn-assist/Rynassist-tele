@@ -156,4 +156,12 @@ CREATE TABLE IF NOT EXISTS balance_logs (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS usage_daily_users (
+  day TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+  interactions INTEGER NOT NULL DEFAULT 0 CHECK (interactions >= 0),
+  PRIMARY KEY(day,user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_usage_daily_day ON usage_daily_users(day);
+
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
