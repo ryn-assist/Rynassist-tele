@@ -15,15 +15,19 @@ const config = {
   adminIds: parseAdminIds(process.env.ADMIN_IDS),
   databasePath: path.resolve(process.cwd(), process.env.DATABASE_PATH || './data/rynassist.db'),
   storeName: process.env.STORE_NAME || 'RynAssist',
-  currency: process.env.CURRENCY || 'Rp'
-  ,paymentProvider: (process.env.PAYMENT_PROVIDER || 'pakasir').toLowerCase()
-  ,pakasirSlug: process.env.PAKASIR_SLUG || ''
-  ,pakasirApiKey: process.env.PAKASIR_API_KEY || ''
-  ,midtransServerKey: process.env.MIDTRANS_SERVER_KEY || ''
-  ,midtransClientKey: process.env.MIDTRANS_CLIENT_KEY || ''
-  ,midtransProduction: String(process.env.MIDTRANS_IS_PRODUCTION).toLowerCase() === 'true'
-  ,paymentBaseUrl: process.env.PAYMENT_BASE_URL || ''
-  ,port: Number(process.env.PORT || 0)
+  currency: process.env.CURRENCY || 'Rp',
+  paymentProvider: (process.env.PAYMENT_PROVIDER || 'pakasir').toLowerCase(),
+  pakasirSlug: process.env.PAKASIR_SLUG || '',
+  pakasirApiKey: process.env.PAKASIR_API_KEY || '',
+  midtransServerKey: process.env.MIDTRANS_SERVER_KEY || '',
+  midtransClientKey: process.env.MIDTRANS_CLIENT_KEY || '',
+  midtransProduction: String(process.env.MIDTRANS_IS_PRODUCTION).toLowerCase() === 'true',
+  paymentBaseUrl: process.env.PAYMENT_BASE_URL || '',
+  port: Number(process.env.PORT || 0),
+  ownerContact: process.env.OWNER_CONTACT || '',
+  notificationChatId: process.env.NOTIFICATION_CHAT_ID || '',
+  bannerUrl: process.env.BANNER_URL || '',
+  autoBackupEnabled: String(process.env.AUTO_BACKUP_ENABLED ?? 'true').toLowerCase() === 'true'
 };
 
 function validateConfig() {
