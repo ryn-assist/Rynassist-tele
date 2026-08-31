@@ -5,9 +5,13 @@ function formatWib(date=new Date()){
   return `${get('day')} ${get('month')} ${get('year')} pukul ${get('hour')}.${get('minute')}`;
 }
 function methodLabel(method){return String(method||'').toLowerCase()==='balance'?'Saldo':'QRIS auto';}
+function stockDetail(stock,index){
+  const content=String(stock?.content??'').trim();
+  return `${index+1}. Email : ${content}\n- password : `;
+}
 function transactionSuccessText(data){
   const stocks=Array.isArray(data.stocks)?data.stocks:[];
-  const details=stocks.map((stock,index)=>`${index+1}. ${stock.content}`).join('\n');
-  return `╭────〔 TRANSAKSI SUKSES 〕─\n\n┊・Pay ID : ${data.orderId ?? '-'}\n┊・Kode Unik : ${data.invoice || '-'}\n┊・Nama Produk : ${data.productName || '-'}\n┊・Nama Variasi : ${data.variantName || '-'}\n┊・ID Buyer : ${data.userId ?? '-'}\n┊・Nomor Buyer : ${data.buyerNumber || '-'}\n┊・Jumlah Beli : ${data.quantity ?? stocks.length}\n┊・Berhasil Dipenuhi : ${stocks.length} akun\n┊・Harga Terpakai : ${formatNumber(data.unitPrice)}\n┊・Fee : ${data.fee == null ? '-' : formatNumber(data.fee)}\n┊・Total Dibayar : ${formatNumber(data.total)}\n┊・Methode Pay : ${methodLabel(data.paymentMethod)}\n┊・Tanggal/Jam Transaksi : ${formatWib()}\n╰┈┈┈┈┈┈┈┈\n〔 *PRODUCT DETAIL* 〕\n${details || '-'}`;
+  const details=stocks.map(stockDetail).join('\n');
+  return `╭────〔 TRANSAKSI SUKSES 〕─\n\n┊・Pay ID : ${data.orderId ?? '-'}\n┊・Kode Unik : ${data.invoice || '-'}\n┊・Nama Produk : ${data.productName || '-'}\n┊・Nama Variasi : ${data.variantName || '-'}\n┊・ID Buyer : ${data.userId ?? '-'}\n┊・Nomor Buyer : ${data.buyerNumber || '-'}\n┊・Jumlah Beli : ${data.quantity ?? stocks.length}\n┊・Berhasil Dipenuhi : ${stocks.length} akun\n┊・Harga Terpakai : ${formatNumber(data.unitPrice)}\n┊・Fee : ${data.fee == null ? '-' : formatNumber(data.fee)}\n┊・Total Dibayar : ${formatNumber(data.total)}\n┊・Methode Pay : ${methodLabel(data.paymentMethod)}\n┊・Tanggal/Jam Transaksi : ${formatWib()}\n╰┈┈┈┈┈┈┈┈\n〔 *PRODUCT DETAIL* 〕\n${details || '1. Email :\n- password : '}`;
 }
-module.exports={transactionSuccessText,formatWib};
+module.exports={transactionSuccessText,formatWib,stockDetail};
