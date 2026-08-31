@@ -13,7 +13,6 @@ async function openMainMenu(ctx) {
 function registerStart(bot) {
   bot.start(openMainMenu);
   bot.command('menu', openMainMenu);
-  bot.command('help',ctx=>ctx.reply(`🆘 <b>Bantuan ${config.storeName}</b>\n\nJika ada masalah dengan pesanan, pembayaran, deposit, atau produk, silakan hubungi owner:\n<b>${config.ownerContact||'Kontak owner belum diatur.'}</b>`,{parse_mode:'HTML'}));
   bot.action('menu:main', async (ctx) => { await ctx.answerCbQuery(); await safeEdit(ctx, welcome(ctx.from.first_name), { parse_mode: 'HTML' }); await openMainMenu(ctx); });
 }
 module.exports = { openMainMenu, registerStart, welcome };
