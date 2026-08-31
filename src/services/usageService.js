@@ -1,0 +1,5 @@
+const {getDb}=require('../database');
+function wibDay(date=new Date()){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(date);}
+function record(userId){const day=wibDay();getDb().prepare(`INSERT INTO usage_daily_users(day,user_id,interactions) VALUES(?,?,1) ON CONFLICT(day,user_id) DO UPDATE SET interactions=interactions+1`).run(day,userId);}
+function summary(){const db=getDb(),today=wibDay();const month=today.slice(0,7);const todayRow=db.prepare('SELECT COUNT(*) active_users,COALESCE(SUM(interactions),0) interactions FROM usage_daily_users WHERE day=?').get(today);const monthRow=db.prepare("SELECT COUNT(DISTINCT user_id) active_users,COALESCE(SUM(interactions),0) interactions FROM usage_daily_users WHERE substr(day,1,7)=?").get(month);const all=db.prepare('SELECT COUNT(DISTINCT user_id) active_users,COALESCE(SUM(interactions),0) interactions FROM usage_daily_users').get();return{today:todayRow,month:monthRow,all};}
+module.exports={record,summary,wibDay};
