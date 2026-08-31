@@ -2,6 +2,7 @@ const { Telegraf, session } = require('telegraf');
 const { config, validateConfig } = require('./config');
 const { getDb, closeDb } = require('./database');
 const userService = require('./services/userService');
+const usageService=require('./services/usageService');
 const backupService=require('./services/backupService');
 const { registerStart } = require('./commands/start');
 const { registerAdminCommands } = require('./commands/admin');
@@ -9,6 +10,7 @@ const { registerAdminFileHandlers }=require('./handlers/adminFileHandler');
 const { registerProductHandlers } = require('./handlers/productHandler');
 const { registerAccountHandlers } = require('./handlers/accountHandler');
 const { registerMenuHandlers } = require('./handlers/menuHandler');
+const { registerUsageHandlers }=require('./handlers/usageHandler');
 const { startWebhookServer } = require('./server');
 
 const BOT_COMMANDS = [
@@ -27,8 +29,8 @@ const bot = new Telegraf(config.botToken);
 const webhookServer = startWebhookServer(bot);
 const autoBackupTimer=backupService.startAutoBackup(bot);
 bot.use(session({ defaultSession: () => ({ quantities: {}, productPage: [] }) }));
-bot.use(async (ctx, next) => { if (ctx.from) userService.upsertUser(ctx.from); return next(); });
-registerStart(bot); registerAdminCommands(bot);registerAdminFileHandlers(bot); registerProductHandlers(bot); registerAccountHandlers(bot); registerMenuHandlers(bot);
+bot.use(async (ctx, next) => { if (ctx.from) {userService.upsertUser(ctx.from);try{usageService.record(ctx.from.id);}catch(e){console.warn('Pencatatan usage gagal:',e.message);}} return next(); });
+registerStart(bot); registerAdminCommands(bot);registerAdminFileHandlers(bot); registerProductHandlers(bot); registerAccountHandlers(bot); registerMenuHandlers(bot);registerUsageHandlers(bot);
 bot.catch((error, ctx) => { console.error(`Bot error pada update ${ctx.update.update_id}:`, error); ctx.reply('Terjadi kesalahan. Silakan coba lagi.').catch(() => {}); });
 bot.telegram.setMyCommands(BOT_COMMANDS).then(() => bot.launch()).then(() => console.log(`${config.storeName} aktif.`)).catch((error) => { console.error('Gagal menjalankan bot:', error); closeDb(); process.exitCode = 1; });
 function shutdown(signal) { console.log(`${signal}: menutup bot…`); if(autoBackupTimer)clearInterval(autoBackupTimer);bot.stop(signal); webhookServer?.close(); closeDb(); }
