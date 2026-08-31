@@ -123,6 +123,22 @@ CREATE TABLE IF NOT EXISTS deposits (
 );
 CREATE INDEX IF NOT EXISTS idx_deposits_user ON deposits(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS vouchers (
+  code TEXT PRIMARY KEY COLLATE NOCASE,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  max_uses INTEGER NOT NULL DEFAULT 1 CHECK (max_uses > 0),
+  used_count INTEGER NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS voucher_redemptions (
+  voucher_code TEXT NOT NULL REFERENCES vouchers(code) ON DELETE RESTRICT,
+  user_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(voucher_code,user_id)
+);
+
 CREATE TABLE IF NOT EXISTS restock_subscriptions (
   user_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
   product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
