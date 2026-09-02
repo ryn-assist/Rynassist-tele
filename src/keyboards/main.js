@@ -10,10 +10,11 @@ function numberRows(productCount) {
 
 function mainKeyboard() {
   const rows = [
-    ['🏷️ List Produk', '📮 Voucher', '🗂️ Laporan Stok'],
+    ['🏷️ List Produk', '📮 Voucher', '🎁 Gift Saldo'],
     ...numberRows(productService.activeProductCount()),
-    ['💰 Cek Saldo', '💰 Deposit'],
-    ['❔ Cara Order', '⚠️ Information', '📜 Riwayat']
+    ['💰 Cek Saldo', '💰 Deposit', '💳 Riwayat Saldo'],
+    ['🗂️ Laporan Stok', '❔ Cara Order'],
+    ['⚠️ Information', '📜 Riwayat']
   ];
   return Markup.keyboard(rows)
     .resize(true)
