@@ -146,6 +146,13 @@ CREATE TABLE IF NOT EXISTS restock_subscriptions (
   PRIMARY KEY (user_id, product_id)
 );
 
+CREATE TABLE IF NOT EXISTS restock_variant_subscriptions (
+  user_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+  variant_id INTEGER NOT NULL REFERENCES product_variants(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, variant_id)
+);
+
 CREATE TABLE IF NOT EXISTS balance_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(telegram_id),
@@ -154,6 +161,25 @@ CREATE TABLE IF NOT EXISTS balance_logs (
   note TEXT NOT NULL,
   admin_id INTEGER,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS saldo_gifts (
+  code TEXT PRIMARY KEY COLLATE NOCASE,
+  total_amount INTEGER NOT NULL CHECK (total_amount > 0),
+  remaining_amount INTEGER NOT NULL CHECK (remaining_amount >= 0),
+  max_claims INTEGER NOT NULL CHECK (max_claims > 0),
+  claimed_count INTEGER NOT NULL DEFAULT 0 CHECK (claimed_count >= 0),
+  mode TEXT NOT NULL DEFAULT 'fixed' CHECK (mode IN ('fixed','random')),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS saldo_gift_claims (
+  gift_code TEXT NOT NULL REFERENCES saldo_gifts(code) ON DELETE RESTRICT,
+  user_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(gift_code,user_id)
 );
 
 CREATE TABLE IF NOT EXISTS usage_daily_users (
