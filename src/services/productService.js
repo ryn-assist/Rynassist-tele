@@ -21,20 +21,21 @@ function addProductVariant({code,category,name,price,description}){
   const variantCode=requireProductCode(code),categoryName=requireText(category,'Kategori',100),variantName=requireText(name,'Nama',100),variantPrice=requireNonNegativeInteger(price,'Harga'),desc=requireText(description||'-','Deskripsi',2000);
   return getDb().transaction(()=>{
     let product=getDb().prepare('SELECT * FROM products WHERE lower(trim(name))=lower(trim(?)) LIMIT 1').get(categoryName),createdProduct=false;
+    const productWasInactive=Boolean(product&&!product.is_active);
     if(!product){
       const base=categoryCode(categoryName);let productCode=base,n=1;
       while(getDb().prepare('SELECT 1 FROM products WHERE code=? COLLATE NOCASE').get(productCode))productCode=`${base.slice(0,34)}-${++n}`;
       const productId=getDb().prepare('INSERT INTO products(code,name,price,description) VALUES(?,?,?,?)').run(productCode,categoryName,variantPrice,desc).lastInsertRowid;
       product=getDb().prepare('SELECT * FROM products WHERE id=?').get(productId);createdProduct=true;
-    }else if(!product.is_active){
+    }else if(productWasInactive){
       getDb().prepare('UPDATE products SET is_active=1,price=?,description=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(variantPrice,desc,product.id);
       product={...product,is_active:1,price:variantPrice,description:desc};
     }
 
     const existing=getDb().prepare('SELECT * FROM product_variants WHERE code=? COLLATE NOCASE').get(variantCode);
     if(existing){
-      if(existing.is_active)throw new Error('Kode produk/variasi sudah digunakan.');
       if(Number(existing.product_id)!==Number(product.id))throw new Error('Kode lama masih terikat ke produk lain. Gunakan kode berbeda.');
+      if(existing.is_active&&!productWasInactive)throw new Error('Kode produk/variasi sudah digunakan.');
       getDb().prepare('UPDATE product_variants SET name=?,price=?,description=?,is_active=1,bulk_tiers=NULL,post_purchase_message=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(variantName,variantPrice,desc,existing.id);
       return{productId:product.id,variantId:existing.id,createdProduct:false,reactivated:true};
     }
@@ -44,7 +45,8 @@ function addProductVariant({code,category,name,price,description}){
     return{productId:product.id,variantId,createdProduct,reactivated:false};
   }).immediate();
 }
-function updateProduct(id,field,value){const productId=requirePositiveInteger(id,'ID produk');const allowed=new Set(['code','name','description','price','is_active']);if(!allowed.has(field))throw new Error('Field edit tidak valid.');const validators={code:requireProductCode,name:v=>requireText(v,'Nama produk',100),description:v=>{const t=String(v??'').trim();if(t.length>2000)throw new Error('Deskripsi maksimal 2000 karakter.');return t;},price:v=>requireNonNegativeInteger(v,'Harga'),is_active:v=>{const n=Number(v);if(![0,1].includes(n))throw new Error('is_active hanya boleh 0 atau 1.');return n;}};return getDb().prepare(`UPDATE products SET ${field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(validators[field](value),productId);}function deleteProduct(id){return updateProduct(id,'is_active',0);}
+function updateProduct(id,field,value){const productId=requirePositiveInteger(id,'ID produk');const allowed=new Set(['code','name','description','price','is_active']);if(!allowed.has(field))throw new Error('Field edit tidak valid.');const validators={code:requireProductCode,name:v=>requireText(v,'Nama produk',100),description:v=>{const t=String(v??'').trim();if(t.length>2000)throw new Error('Deskripsi maksimal 2000 karakter.');return t;},price:v=>requireNonNegativeInteger(v,'Harga'),is_active:v=>{const n=Number(v);if(![0,1].includes(n))throw new Error('is_active hanya boleh 0 atau 1.');return n;}};return getDb().prepare(`UPDATE products SET ${field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(validators[field](value),productId);}
+function deleteProduct(id){const productId=requirePositiveInteger(id,'ID produk');return getDb().transaction(()=>{const result=getDb().prepare('UPDATE products SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(productId);if(result.changes)getDb().prepare('UPDATE product_variants SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE product_id=?').run(productId);return result;}).immediate();}
 function listVariants(productId,activeOnly=false){return getDb().prepare(`SELECT v.*,COUNT(CASE WHEN s.status='available' THEN 1 END) available_stock,COUNT(CASE WHEN s.status='sold' THEN 1 END) sold_stock,COUNT(s.id) total_stock FROM product_variants v LEFT JOIN stock_items s ON s.variant_id=v.id WHERE v.product_id=? ${activeOnly?'AND v.is_active=1':''} GROUP BY v.id ORDER BY v.id`).all(requirePositiveInteger(productId,'ID produk'));}
 function getVariant(id,activeOnly=false){return getDb().prepare(`SELECT v.*,p.name product_name,p.code product_code,p.is_active product_active,COUNT(CASE WHEN s.status='available' THEN 1 END) available_stock,COUNT(CASE WHEN s.status='sold' THEN 1 END) sold_stock,COUNT(s.id) total_stock FROM product_variants v JOIN products p ON p.id=v.product_id LEFT JOIN stock_items s ON s.variant_id=v.id WHERE v.id=? ${activeOnly?'AND v.is_active=1 AND p.is_active=1':''} GROUP BY v.id`).get(requirePositiveInteger(id,'ID varian'));}
 function createVariant(productId,name,price,code,description=''){const id=requirePositiveInteger(productId,'ID produk');const product=getDb().prepare('SELECT code FROM products WHERE id=?').get(id);if(!product)throw new Error('Produk tidak ditemukan.');const cleanCode=requireProductCode(code||`${product.code}-${crypto.randomBytes(4).toString('hex')}`);return getDb().prepare('INSERT INTO product_variants(product_id,name,code,price,description) VALUES(?,?,?,?,?)').run(id,requireText(name,'Nama varian',100),cleanCode,requireNonNegativeInteger(price,'Harga'),requireText(description||'-','Deskripsi',2000)).lastInsertRowid;}
